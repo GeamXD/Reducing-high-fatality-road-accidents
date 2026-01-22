@@ -18,7 +18,7 @@ def get_file_size_mb(filepath):
     """Get file size in MB"""
     return os.path.getsize(filepath) / (1024 * 1024)
 
-def convert_large_csv_chunked(csv_path, output_dir):
+def convert_large_csv_chunked(csv_path, output_dir, year_filter=None):
     """Convert large CSV to Parquet using chunked processing, writing directly to split files"""
     csv_file = Path(csv_path)
     output_path = Path(output_dir)
@@ -26,6 +26,8 @@ def convert_large_csv_chunked(csv_path, output_dir):
     
     base_name = csv_file.stem
     print(f"\nProcessing: {csv_file.name}")
+    if year_filter:
+        print(f"  Filtering data from {year_filter[0]} to {year_filter[1]}")
     print(f"  Determining schema from first chunk...")
     
     # Read first chunk to establish schema
@@ -40,10 +42,23 @@ def convert_large_csv_chunked(csv_path, output_dir):
     current_file = None
     current_size = 0
     total_rows = 0
+    filtered_rows = 0
     rows_in_current_part = 0
     
     try:
         for chunk_num, chunk in enumerate(pd.read_csv(csv_path, chunksize=CHUNK_SIZE, low_memory=False, dtype=str), 1):
+            # Apply year filter if specified
+            if year_filter and 'collision_year' in chunk.columns:
+                chunk['collision_year'] = pd.to_numeric(chunk['collision_year'], errors='coerce')
+                original_len = len(chunk)
+                chunk = chunk[(chunk['collision_year'] >= year_filter[0]) & 
+                             (chunk['collision_year'] <= year_filter[1])]
+                filtered_rows += (original_len - len(chunk))
+                
+                # Skip empty chunks
+                if len(chunk) == 0:
+                    continue
+            
             # Convert string columns back to appropriate types based on master schema
             for i, field in enumerate(master_schema):
                 col_name = field.name
@@ -95,6 +110,8 @@ def convert_large_csv_chunked(csv_path, output_dir):
             output_files.append(str(current_file))
         
         print(f"  Total rows processed: {total_rows:,}")
+        if year_filter and filtered_rows > 0:
+            print(f"  Rows filtered out: {filtered_rows:,}")
         print(f"  ✓ Saved as {len(output_files)} file(s)")
         
         return output_files
@@ -159,6 +176,7 @@ def main():
     print("=" * 60)
     print("CSV to Parquet Conversion (Memory Optimized)")
     print("=" * 60)
+    print("\nNote: 2024_prior files will be filtered to 2010-2024 only")
     
     csv_files = {
         '2025_dataset': [
@@ -182,6 +200,9 @@ def main():
         
         output_dir = f"data/parquet/{category}"
         
+        # Set year filter for 2024_prior data
+        year_filter = (2010, 2024) if category == '2024_prior' else None
+        
         for csv_file in files:
             if not os.path.exists(csv_file):
                 print(f"\n⚠ Warning: {csv_file} not found, skipping...")
@@ -193,7 +214,7 @@ def main():
                 print(f"  CSV file size: {file_size_mb:.2f} MB")
                 
                 if file_size_mb > 500:  # Use chunked processing for files > 500MB
-                    output_files = convert_large_csv_chunked(csv_file, output_dir)
+                    output_files = convert_large_csv_chunked(csv_file, output_dir, year_filter)
                 else:
                     output_files = convert_small_csv(csv_file, output_dir)
                 
