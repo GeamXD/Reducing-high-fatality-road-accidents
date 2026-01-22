@@ -201,7 +201,7 @@ def main():
         output_dir = f"data/parquet/{category}"
         
         # Set year filter for 2024_prior data
-        year_filter = (2010, 2024) if category == '2024_prior' else None
+        year_filter = (2015, 2024) if category == '2024_prior' else None
         
         for csv_file in files:
             if not os.path.exists(csv_file):
